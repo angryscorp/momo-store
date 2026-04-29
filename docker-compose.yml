@@ -1,0 +1,27 @@
+name: momo-store
+
+services:
+  backend:
+    build: ./backend
+    image: momo-store/backend:dev
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run serve -- --host 0.0.0.0 --port 8080"
+    environment:
+      NODE_ENV: development
+      VUE_APP_API_URL: http://localhost:8081
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
+volumes:
+  frontend-node-modules:
