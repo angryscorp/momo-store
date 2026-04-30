@@ -1,0 +1,54 @@
+version: '3'
+
+includes:
+  back:
+    taskfile: ./backend/Taskfile.yml
+    dir: ./backend
+  front:
+    taskfile: ./frontend/Taskfile.yml
+    dir: ./frontend
+
+tasks:
+  default:
+    desc: List all tasks
+    cmds:
+      - task --list-all
+    silent: true
+
+  up:
+    desc: Start full stack via docker compose
+    cmds:
+      - docker compose up -d --build
+      - echo "Backend  → http://localhost:8081"
+      - echo "Frontend → http://localhost:8080"
+
+  down:
+    desc: Stop and remove docker compose stack
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: Tail compose logs for all services (set SERVICE=backend or SERVICE=frontend to limit to one)
+    cmds:
+      - docker compose logs -f {{.SERVICE}}
+
+  ps:
+    desc: Show compose service status
+    cmds:
+      - docker compose ps
+
+  build:
+    desc: Build all docker compose images
+    cmds:
+      - docker compose build
+
+  test:
+    desc: Run backend tests
+    cmds:
+      - task: back:test
+
+  docker:build:
+    desc: Build production images for both services
+    cmds:
+      - task: back:docker:build
+      - task: front:docker:build
