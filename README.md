@@ -96,6 +96,55 @@ task front:docker:run    # http://localhost:8080/momo-store/
 
 OCI image labels (`org.opencontainers.image.version`, `revision`, `created`) are populated automatically from `git describe`, `git rev-parse HEAD`, and the current UTC timestamp by the Taskfile. CI pipelines can override them via `--build-arg`.
 
+## CI/CD
+
+GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/):
+
+| Workflow                                       | Trigger                                 | What it does                                          |
+|------------------------------------------------|-----------------------------------------|-------------------------------------------------------|
+| [`ci.yml`](.github/workflows/ci.yml)           | Pull request to `main`                  | Runs Go tests, builds both Docker images (no push)    |
+| [`release.yml`](.github/workflows/release.yml) | Push to `main` and `release-*` branches | Builds and pushes images to Yandex Container Registry |
+
+### Branching model
+
+Modified trunk-based:
+
+- **`main`** — single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. ArgoCD picks them up and deploys to **staging**.
+- **`release-YYMMDDHHMM`** — short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. ArgoCD deploys to **production**.
+- **Hotfix flow** — fix in `main` → cherry-pick into a fresh `release-YYMMDDHHMM` branch cut from the broken release.
+
+### Image tag scheme
+
+| Trigger                      | Tags pushed                                                        |
+|------------------------------|--------------------------------------------------------------------|
+| Push to `main`               | `:main`, `:main-<sha7>`                                            |
+| Push to `release-2604301700` | `:release-2604301700`, `:release-2604301700-<sha7>`, `:2604301700` |
+| Pull request                 | (built only, not pushed)                                           |
+
+The bare timestamp tag (`:2604301700`) is what ArgoCD's production Application Set tracks via a regex like `^\d{10}$`.
+
+### Required GitHub configuration
+
+Once-off setup in the repository:
+
+1. **Repository secrets** (Settings → Secrets and variables → Actions → New repository secret):
+   - `YC_SA_JSON_KEY` — full JSON of the Yandex Cloud service account key with the `container-registry.images.pusher` role on the registry.
+2. **Repository variables** (same screen, Variables tab):
+   - `YC_REGISTRY_ID` — the registry ID (`crp...`).
+3. **Environments** (Settings → Environments → New environment):
+   - `staging` — no protection rules. Used by `main` builds.
+   - `production` — set "Required reviewers" to yourself / team. Used by `release-*` builds; the workflow waits for an approval click before pushing images.
+
+### Cutting a release
+
+```bash
+git checkout main && git pull
+git checkout -b release-$(date -u +%y%m%d%H%M)
+git push -u origin HEAD
+```
+
+The push triggers `release.yml`. In the GitHub UI under Actions you'll see the run paused on "Waiting for review" — approve it, and images land in YCR within a couple of minutes.
+
 ## Running without Docker
 
 Backend:

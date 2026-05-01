@@ -1,0 +1,94 @@
+name: Release
+
+# Builds and pushes images to Yandex Container Registry.
+#
+# Triggers:
+#   - push to main → tags :main, main-<sha7> (deployed to staging by ArgoCD)
+#   - push to release-* → :<release>, :release-<release>-<sha7>, :<timestamp> (deployed to production after manual approval)
+#
+# The "production" GitHub environment gates the release-* run with required reviewers,
+# so a push to a release-* branch waits for someone to click "Approve" before pushing
+# images to YCR.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build & push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+
+    # main → staging (auto, no approval); release-* → production (gated)
+    environment: ${{ startsWith(github.ref, 'refs/heads/release-') && 'production' || 'staging' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            context: ./backend
+            extra_build_args: ''
+          - service: frontend
+            context: ./frontend
+            extra_build_args: |
+              VUE_APP_API_URL=/api
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history for `git describe --tags`
+          fetch-depth: 0
+
+      - name: Login to Yandex Container Registry
+        run: |
+          echo '${{ secrets.YC_SA_JSON_KEY }}' \
+            | docker login --username json_key --password-stdin cr.yandex
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: cr.yandex/${{ vars.YC_REGISTRY_ID }}/${{ matrix.service }}
+          tags: |
+            # Branch name as tag — :main or :release-2604301730
+            type=ref,event=branch
+            # Immutable per-commit tag — :main-abc1234 or :release-2604301730-abc1234
+            type=sha,prefix={{branch}}-,format=short
+            # For release-YYMMDDHHMM, also produce :YYMMDDHHMM (the bare timestamp)
+            type=match,pattern=release-(\d+),group=1
+
+      - name: Compute version metadata
+        id: vermeta
+        run: |
+          echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.vermeta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.vermeta.outputs.build_date }}
+            ${{ matrix.extra_build_args }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Summary
+        run: |
+          echo "### Pushed ${{ matrix.service }} image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

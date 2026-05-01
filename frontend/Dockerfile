@@ -3,7 +3,9 @@
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
-ARG VUE_APP_API_URL=http://localhost:8081
+# Frontend talks to the API via the same origin under /api (handled by k8s ingress).
+# docker-compose overrides this with http://localhost:8081 for local-only setups.
+ARG VUE_APP_API_URL=/api
 
 FROM node:20-alpine AS builder
 
