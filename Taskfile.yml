@@ -7,6 +7,9 @@ includes:
   front:
     taskfile: ./frontend/Taskfile.yml
     dir: ./frontend
+  tf:
+    taskfile: ./terraform/Taskfile.yml
+    dir: ./terraform
 
 tasks:
   default:

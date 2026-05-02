@@ -23,3 +23,16 @@ vendor/
 
 # macOS
 .DS_Store
+
+# Terraform
+#   .terraform/ – providers/modules cache
+#   *.tfstate*  – state files plus *.tfstate.backup / *.tfstate.lock.info
+#   *.tfvars    – variable files (the *.example variants stay)
+#   backend.hcl – bucket name + creds for the s3 backend
+**/.terraform/
+**/*.tfstate*
+**/*.tfvars
+!**/*.tfvars.example
+**/backend.hcl
+crash.log
+crash.*.log

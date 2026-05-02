@@ -1,0 +1,23 @@
+version: '3'
+
+# Facade Taskfile for everything terraform-related.
+
+includes:
+  bootstrap:
+    taskfile: ./bootstrap/Taskfile.yml
+    dir: ./bootstrap
+  infra:
+    taskfile: ./infra/Taskfile.yml
+    dir: ./infra
+
+tasks:
+  default:
+    desc: List terraform tasks
+    cmds:
+      - task --list --taskfile {{.TASKFILE}}
+    silent: true
+
+  kubeconfig:
+    desc: Merge momo-store cluster credentials into ~/.kube/config
+    cmds:
+      - yc managed-kubernetes cluster get-credentials --name momo-store-k8s --external --force

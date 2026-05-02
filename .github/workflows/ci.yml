@@ -3,6 +3,7 @@ name: CI
 # Runs on every PR targeting main. Validates that:
 #   - Go tests pass
 #   - Both Docker images build successfully (no push)
+#   - Terraform files are formatted and valid
 # Push events are handled by release.yml; we don't double-build here.
 
 on:
@@ -57,3 +58,30 @@ jobs:
             VUE_APP_API_URL=/api
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+  terraform-lint:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [bootstrap, infra]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9'
+
+      - name: terraform fmt
+        working-directory: terraform/${{ matrix.module }}
+        run: terraform fmt -check -diff
+
+      # -backend=false skips the s3 backend setup so we don't need real YC creds in CI just to validate syntax.
+      - name: terraform init (no backend)
+        working-directory: terraform/${{ matrix.module }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: terraform/${{ matrix.module }}
+        run: terraform validate -no-color

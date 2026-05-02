@@ -1,0 +1,4 @@
+cloud_id          = "b1xxxxxxxxxxxxxxxxxx"
+folder_id         = "b1xxxxxxxxxxxxxxxxxx"
+zone              = "ru-central1-a"
+tf_admin_key_path = "~/.config/momo-store/tf-admin-key.json"
