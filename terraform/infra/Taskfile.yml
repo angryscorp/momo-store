@@ -1,0 +1,60 @@
+version: '3'
+
+# Everyday infrastructure changes: VPC, K8s cluster, node group.
+#
+# Auth: tf-admin SA's JSON key (output of bootstrap), pointed at by
+# the `tf_admin_key_path` variable in terraform.tfvars.
+#
+# State: in YC Object Storage. Before running, export the HMAC keys
+# from bootstrap as standard AWS env vars:
+#   export AWS_ACCESS_KEY_ID=$(terraform -chdir=../bootstrap output -raw tf_admin_access_key)
+#   export AWS_SECRET_ACCESS_KEY=$(terraform -chdir=../bootstrap output -raw tf_admin_secret_key)
+
+tasks:
+  default:
+    desc: List infra tasks
+    cmds:
+      - task --list --taskfile {{.TASKFILE}}
+    silent: true
+
+  init:
+    desc: Initialize infra against the s3 backend (uses backend.hcl)
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]'
+        msg: 'AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not set. They carry the HMAC keys for the s3 state backend; export from terraform/bootstrap outputs.'
+    cmds:
+      - terraform init -backend-config=backend.hcl -reconfigure
+
+  lock:
+    desc: Refresh .terraform.lock.hcl with hashes for darwin/linux (run after bumping provider versions)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - terraform providers lock -platform=darwin_arm64 -platform=darwin_amd64 -platform=linux_amd64
+
+  plan:
+    desc: Show planned infra changes
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]'
+        msg: 'AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not set. Re-export from terraform/bootstrap outputs.'
+    cmds:
+      - terraform plan
+
+  apply:
+    desc: Apply infra changes (creates VPC, k8s cluster, node group)
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]'
+        msg: 'AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not set. Re-export from terraform/bootstrap outputs.'
+    cmds:
+      - terraform apply
+
+  destroy:
+    desc: Tear down all infra (DANGER – deletes the cluster)
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]'
+        msg: 'AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not set. Re-export from terraform/bootstrap outputs.'
+    cmds:
+      - terraform destroy

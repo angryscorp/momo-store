@@ -1,0 +1,54 @@
+version: '3'
+
+# One-off setup for the rest of the terraform stack:
+#   * tf-admin service account
+#   * HMAC keys for the s3 state backend
+#   * S3 bucket that holds terraform/infra's tfstate
+#
+# Auth: this step authenticates as the human user via a short-lived IAM
+# token. Before running, export it once per shell:
+#
+#   export YC_TOKEN=$(yc iam create-token)
+
+tasks:
+  default:
+    desc: List bootstrap tasks
+    cmds:
+      - task --list --taskfile {{.TASKFILE}}
+    silent: true
+
+  init:
+    desc: Initialize bootstrap (downloads providers)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - terraform init
+
+  lock:
+    desc: Refresh .terraform.lock.hcl with hashes for darwin/linux (run after bumping provider versions)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - terraform providers lock -platform=darwin_arm64 -platform=darwin_amd64 -platform=linux_amd64
+
+  apply:
+    desc: Create tf-admin SA, HMAC keys and tfstate bucket
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$YC_TOKEN" ]'
+        msg: 'YC_TOKEN is not set. Run: export YC_TOKEN=$(yc iam create-token)'
+    cmds:
+      - terraform apply
+
+  output:
+    desc: Print all bootstrap outputs (sensitive ones masked)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - terraform output
+
+  destroy:
+    desc: Tear down bootstrap (only if you really want to start over)
+    dir: '{{.TASKFILE_DIR}}'
+    preconditions:
+      - sh: '[ -n "$YC_TOKEN" ]'
+        msg: 'YC_TOKEN is not set. Run: export YC_TOKEN=$(yc iam create-token)'
+    cmds:
+      - terraform destroy

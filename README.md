@@ -4,6 +4,8 @@
 
 A full-stack "dumpling shop" demo: Vue 3 SPA (frontend) + Go API (backend).
 
+This repository is a capstone-style learning project focused on building the full delivery path for a small production-like service: local development, container images, CI/CD, cloud infrastructure, Kubernetes, and GitOps-based deployment.
+
 ## Repository layout
 
 ```
@@ -15,8 +17,13 @@ A full-stack "dumpling shop" demo: Vue 3 SPA (frontend) + Go API (backend).
 │   ├── Dockerfile      # multi-stage, nginx runtime
 │   ├── nginx.conf      # SPA routing + /healthz
 │   └── Taskfile.yml    # frontend tasks
+├── terraform/          # Yandex Cloud infrastructure (IaC)
+│   ├── bootstrap/      # one-off: tf-admin SA + S3 bucket for tfstate
+│   ├── infra/          # VPC, K8s cluster, node group
+│   └── Taskfile.yml    # facade Taskfile, includes both modules
+├── .github/workflows/  # CI (ci.yml) + release pipeline (release.yml)
 ├── docker-compose.yml  # local development for both services
-└── Taskfile.yml        # root Taskfile, includes back/* and front/*
+└── Taskfile.yml        # root Taskfile, includes backend, frontend, terraform
 ```
 
 ## Requirements
@@ -72,6 +79,11 @@ Most useful ones:
 | `task front:build`        | Build the SPA into `frontend/dist`                                               |
 | `task front:docker:build` | Build the frontend production image                                              |
 | `task front:docker:run`   | Run the frontend production image                                                |
+| `task tf:bootstrap:apply` | One-off: create tf-admin SA + S3 state bucket (run once)                         |
+| `task tf:infra:plan`      | Show planned cluster changes                                                     |
+| `task tf:infra:apply`     | Provision / update VPC + K8s cluster                                             |
+| `task tf:infra:destroy`   | Tear down all infra (DANGER — deletes the cluster)                               |
+| `task tf:kubeconfig`      | Merge cluster credentials into `~/.kube/config`                                  |
 
 ## Production images
 
@@ -100,10 +112,10 @@ OCI image labels (`org.opencontainers.image.version`, `revision`, `created`) are
 
 GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/):
 
-| Workflow                                       | Trigger                                 | What it does                                          |
-|------------------------------------------------|-----------------------------------------|-------------------------------------------------------|
-| [`ci.yml`](.github/workflows/ci.yml)           | Pull request to `main`                  | Runs Go tests, builds both Docker images (no push)    |
-| [`release.yml`](.github/workflows/release.yml) | Push to `main` and `release-*` branches | Builds and pushes images to Yandex Container Registry |
+| Workflow                                       | Trigger                                 | What it does                                                                        |
+|------------------------------------------------|-----------------------------------------|-------------------------------------------------------------------------------------|
+| [`ci.yml`](.github/workflows/ci.yml)           | Pull request to `main`                  | Runs Go tests, builds both Docker images (no push), checks terraform fmt + validate |
+| [`release.yml`](.github/workflows/release.yml) | Push to `main` and `release-*` branches | Builds and pushes images to Yandex Container Registry                               |
 
 ### Branching model
 
@@ -144,6 +156,84 @@ git push -u origin HEAD
 ```
 
 The push triggers `release.yml`. In the GitHub UI under Actions you'll see the run paused on "Waiting for review" — approve it, and images land in YCR within a couple of minutes.
+
+## Infrastructure
+
+All Yandex Cloud infrastructure is defined in [`terraform/`](terraform/) and split into two stages.
+
+```
+terraform/
+├── bootstrap/   # one-off: tf-admin SA, HMAC keys, S3 bucket for tfstate
+└── infra/       # everything else: VPC, K8s cluster, node group
+```
+
+### Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.9
+- [yc CLI](https://yandex.cloud/en/docs/cli/quickstart) authenticated against your cloud (`yc init`)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+
+### One-off bootstrap
+
+```bash
+# Use a short-lived IAM token of your user account for the bootstrap apply.
+export YC_TOKEN=$(yc iam create-token)
+
+task tf:bootstrap:init
+task tf:bootstrap:apply
+
+# Save the JSON key for tf-admin SA, the infra step authenticates with it.
+mkdir -p ~/.config/momo-store
+terraform -chdir=terraform/bootstrap output -raw tf_admin_key_json \
+  > ~/.config/momo-store/tf-admin-key.json
+chmod 600 ~/.config/momo-store/tf-admin-key.json
+
+# Capture HMAC keys + bucket name for the s3 backend.
+BUCKET=$(terraform -chdir=terraform/bootstrap output -raw tf_state_bucket)
+echo "bucket = \"$BUCKET\"" > terraform/infra/backend.hcl
+
+export AWS_ACCESS_KEY_ID=$(terraform -chdir=terraform/bootstrap output -raw tf_admin_access_key)
+export AWS_SECRET_ACCESS_KEY=$(terraform -chdir=terraform/bootstrap output -raw tf_admin_secret_key)
+```
+
+### Provisioning the cluster
+
+```bash
+# Same shell, AWS_* env vars must still be exported
+task tf:infra:init       # downloads providers, configures s3 backend
+task tf:infra:plan       # review what will be created
+task tf:infra:apply      # creates VPC, master, nodes (~10 minutes)
+
+task tf:kubeconfig       # merges cluster into ~/.kube/config
+kubectl get nodes        # should show 2 Ready nodes
+```
+
+### What gets created
+
+| Resource                                          | Purpose                                                    |
+|---------------------------------------------------|------------------------------------------------------------|
+| `yandex_vpc_network.main` + `yandex_vpc_subnet.a` | One VPC, one /24 subnet in `ru-central1-a`                 |
+| `yandex_iam_service_account.k8s_cluster`          | Cluster SA with `k8s.clusters.agent` and `vpc.publicAdmin` |
+| `yandex_iam_service_account.k8s_nodes`            | Node SA to pull images from YCR (`images.puller`)          |
+| `yandex_kubernetes_cluster.main`                  | Zonal master, K8s 1.33, REGULAR channel, public IP         |
+| `yandex_kubernetes_node_group.main`               | 2 × `standard-v3` (2 vCPU / 4 GB), preemptible             |
+
+Namespaces (`staging`, `production`) and everything that lives inside the cluster (apps, ingress controller, observability stack) are out of scope for terraform.
+
+### Tearing it down
+
+```bash
+task tf:infra:destroy
+# bootstrap still stays, the bucket holds historical state and costs ~nothing.
+# Destroy bootstrap manually only if you really want to start from scratch:
+#   cd terraform/bootstrap && terraform destroy
+```
+
+### Trade-offs to remember
+
+- **Single AZ + zonal master.** Cheaper, but a YC zone outage takes the whole cluster down. Acceptable for a learning project; for real prod, switch the master to `regional` and spread the node group across zones.
+- **Preemptible nodes.** Up to ~70% cheaper, but YC may evict each node once every 24h. Workloads need to tolerate restarts (which they should anyway).
+- **`admin` role on `tf-admin`.** Convenient, broad. Tighten to a minimal role set once the project stabilizes.
 
 ## Running without Docker
 
