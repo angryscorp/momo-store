@@ -10,6 +10,9 @@ includes:
   tf:
     taskfile: ./terraform/Taskfile.yml
     dir: ./terraform
+  k8s:
+    taskfile: ./deploy/Taskfile.yml
+    dir: ./deploy
 
 tasks:
   default:

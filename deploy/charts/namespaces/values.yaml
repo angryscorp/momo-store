@@ -1,0 +1,7 @@
+namespaces:
+  - name: staging
+    labels:
+      environment: staging
+  - name: production
+    labels:
+      environment: production

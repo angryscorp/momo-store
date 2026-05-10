@@ -1,0 +1,4 @@
+backend:
+  serviceName: staging-backend
+frontend:
+  serviceName: staging-frontend

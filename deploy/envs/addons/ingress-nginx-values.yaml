@@ -1,0 +1,20 @@
+# Overrides for the upstream ingress-nginx chart.
+# Defaults (Service type=LoadBalancer, IngressClass "nginx") suit us as-is.
+# Full reference: https://github.com/kubernetes/ingress-nginx/blob/main/charts/ingress-nginx/values.yaml
+
+controller:
+  replicaCount: 2
+
+  service:
+    # Send traffic only to nodes that run a controller pod, preserving the real client IP in access logs.
+    externalTrafficPolicy: Local
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # JSON access logs.
+  config:
+    log-format-escape-json: "true"
+    log-format-upstream: '{"time":"$time_iso8601","remote_addr":"$remote_addr","method":"$request_method","host":"$host","path":"$request_uri","status":$status,"bytes_sent":$body_bytes_sent,"request_time":$request_time,"upstream_addr":"$upstream_addr","upstream_status":"$upstream_status","upstream_response_time":"$upstream_response_time","referer":"$http_referer","user_agent":"$http_user_agent"}'

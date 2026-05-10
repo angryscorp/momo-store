@@ -17,6 +17,13 @@ resource "yandex_resourcemanager_folder_iam_member" "k8s_cluster_lb" {
   member    = "serviceAccount:${yandex_iam_service_account.k8s_cluster.id}"
 }
 
+# Required for Service type=LoadBalancer to create a Yandex Network Load Balancer.
+resource "yandex_resourcemanager_folder_iam_member" "k8s_cluster_load_balancer_admin" {
+  folder_id = var.folder_id
+  role      = "load-balancer.admin"
+  member    = "serviceAccount:${yandex_iam_service_account.k8s_cluster.id}"
+}
+
 # SA assigned to worker nodes (only needs to pull container images from YCR).
 resource "yandex_iam_service_account" "k8s_nodes" {
   folder_id   = var.folder_id

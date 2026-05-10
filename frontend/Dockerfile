@@ -36,7 +36,7 @@ LABEL org.opencontainers.image.title="momo-store-frontend" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/dist /usr/share/nginx/html/momo-store
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
 

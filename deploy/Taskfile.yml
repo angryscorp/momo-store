@@ -1,0 +1,84 @@
+version: '3'
+
+vars:
+  CHARTS_DIR: charts
+  ENVS_DIR: envs
+
+  INGRESS_NGINX_VERSION: 4.15.1
+
+tasks:
+  default:
+    desc: List all k8s tasks
+    cmds:
+      - task --list-all
+    silent: true
+
+  # --- Cluster-level addons -------------------------------------------------
+
+  addons:repo:add:
+    desc: Add helm repos for cluster addons
+    cmds:
+      - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+      - helm repo update
+
+  addons:ingress:install:
+    desc: Install / upgrade ingress-nginx controller
+    deps: [addons:repo:add]
+    cmds:
+      - |
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+          --namespace ingress-nginx --create-namespace \
+          --version {{.INGRESS_NGINX_VERSION}} \
+          -f {{.ENVS_DIR}}/addons/ingress-nginx-values.yaml \
+          --wait --timeout 5m
+
+  # --- Namespaces -----------------------------------------------------------
+
+  namespaces:apply:
+    desc: Create application namespaces (staging, production)
+    cmds:
+      - helm upgrade --install namespaces {{.CHARTS_DIR}}/namespaces
+
+  # --- Per-environment deploys ---------------------------------------------
+  # Pattern: helm release name = "<env>-<chart>", lives in namespace "<env>".
+
+  staging:deploy:
+    desc: Deploy backend, frontend, ingress to staging
+    cmds:
+      - task: deploy
+        vars: {ENV: staging}
+
+  production:deploy:
+    desc: Deploy backend, frontend, ingress to production
+    cmds:
+      - task: deploy
+        vars: {ENV: production}
+
+  deploy:
+    internal: true
+    requires: {vars: [ENV]}
+    cmds:
+      - |
+        helm upgrade --install {{.ENV}}-backend {{.CHARTS_DIR}}/backend \
+          --namespace {{.ENV}} \
+          -f {{.ENVS_DIR}}/{{.ENV}}/backend-values.yaml \
+          --wait --timeout 3m
+      - |
+        helm upgrade --install {{.ENV}}-frontend {{.CHARTS_DIR}}/frontend \
+          --namespace {{.ENV}} \
+          -f {{.ENVS_DIR}}/{{.ENV}}/frontend-values.yaml \
+          --wait --timeout 3m
+      - |
+        helm upgrade --install {{.ENV}}-ingress {{.CHARTS_DIR}}/ingress \
+          --namespace {{.ENV}} \
+          -f {{.ENVS_DIR}}/{{.ENV}}/ingress-values.yaml
+
+  # --- Inspection ----------------------------------------------------------
+
+  status:
+    desc: Show all helm releases and key cluster resources
+    cmds:
+      - helm list -A
+      - kubectl get svc -n ingress-nginx ingress-nginx-controller
+      - kubectl get pods,svc,ingress -n staging
+      - kubectl get pods,svc,ingress -n production

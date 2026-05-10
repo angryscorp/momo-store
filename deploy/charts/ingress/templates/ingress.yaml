@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: ingress
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
+  annotations:
+    # Strip the /api prefix before forwarding to the backend.
+    # `(/|$)(.*)` captures everything after /api or just /api itself,
+    # and rewrite-target = /$2 forwards only the captured tail.
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    - {{- with .Values.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          # /api/* -> backend, with /api stripped (see rewrite-target above)
+          - path: {{ .Values.backend.pathPrefix }}(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ required "backend.serviceName is required" .Values.backend.serviceName }}
+                port:
+                  number: {{ .Values.backend.servicePort }}
+          # everything else -> frontend
+          - path: {{ .Values.frontend.pathPrefix }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ required "frontend.serviceName is required" .Values.frontend.serviceName }}
+                port:
+                  number: {{ .Values.frontend.servicePort }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.host | quote }}
+      secretName: {{ .Release.Name }}-tls
+  {{- end }}
