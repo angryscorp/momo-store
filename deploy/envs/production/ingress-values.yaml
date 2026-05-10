@@ -1,0 +1,4 @@
+backend:
+  serviceName: production-backend
+frontend:
+  serviceName: production-frontend

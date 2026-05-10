@@ -1,0 +1,51 @@
+replicaCount: 1
+
+image:
+  repository: cr.yandex/crpov7nlvkqq2o3n2ivd/backend
+  tag: main
+  pullPolicy: IfNotPresent
+
+containerPort: 8081
+
+service:
+  type: ClusterIP
+  port: 8081
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /health
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+env: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  # 65532 = uid of the "nonroot" user inside the distroless base image
+  # (gcr.io/distroless/static-debian12:nonroot — see backend/Dockerfile).
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

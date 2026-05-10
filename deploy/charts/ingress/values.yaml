@@ -1,0 +1,22 @@
+# Ingress routing for one environment.
+
+ingressClassName: nginx
+
+# Hostname-based routing. Empty -> match any host (will work via raw LB IP).
+host: ""
+
+# Names must match the Service names produced by backend / frontend charts.
+# Default: release names "<env>-backend" and "<env>-frontend".
+backend:
+  serviceName: ""  # required, e.g. "staging-backend"
+  servicePort: 8081
+  pathPrefix: /api
+
+frontend:
+  serviceName: ""  # required, e.g. "staging-frontend"
+  servicePort: 8080
+  pathPrefix: /
+
+# TLS will be added later (cert-manager + Let's Encrypt).
+tls:
+  enabled: false

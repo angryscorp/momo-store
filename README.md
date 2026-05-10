@@ -21,9 +21,13 @@ This repository is a capstone-style learning project focused on building the ful
 │   ├── bootstrap/      # one-off: tf-admin SA + S3 bucket for tfstate
 │   ├── infra/          # VPC, K8s cluster, node group
 │   └── Taskfile.yml    # facade Taskfile, includes both modules
+├── deploy/             # Kubernetes manifests (Helm charts)
+│   ├── charts/         # namespaces, backend, frontend, ingress
+│   ├── envs/           # per-environment values (staging, production, addons)
+│   └── Taskfile.yml    # k8s:* tasks (deploy, status, addons)
 ├── .github/workflows/  # CI (ci.yml) + release pipeline (release.yml)
 ├── docker-compose.yml  # local development for both services
-└── Taskfile.yml        # root Taskfile, includes backend, frontend, terraform
+└── Taskfile.yml        # root Taskfile, includes backend, frontend, terraform, deploy
 ```
 
 ## Requirements
@@ -62,35 +66,40 @@ task --list-all
 
 Most useful ones:
 
-| Task                      | Description                                                                      |
-|---------------------------|----------------------------------------------------------------------------------|
-| `task up`                 | Bring the full stack up via docker compose                                       |
-| `task down`               | Tear it down                                                                     |
-| `task logs`               | Tail compose logs for all services (`SERVICE=backend task logs` to limit to one) |
-| `task ps`                 | Show service status                                                              |
-| `task build`              | Rebuild compose images                                                           |
-| `task test`               | Run backend Go tests                                                             |
-| `task docker:build`       | Build production images for both services                                        |
-| `task back:run`           | Run the backend natively (`go run`)                                              |
-| `task back:test`          | Backend tests                                                                    |
-| `task back:docker:build`  | Build the backend production image                                               |
-| `task back:docker:run`    | Run the backend production image                                                 |
-| `task front:serve`        | Vue dev server (native)                                                          |
-| `task front:build`        | Build the SPA into `frontend/dist`                                               |
-| `task front:docker:build` | Build the frontend production image                                              |
-| `task front:docker:run`   | Run the frontend production image                                                |
-| `task tf:bootstrap:apply` | One-off: create tf-admin SA + S3 state bucket (run once)                         |
-| `task tf:infra:plan`      | Show planned cluster changes                                                     |
-| `task tf:infra:apply`     | Provision / update VPC + K8s cluster                                             |
-| `task tf:infra:destroy`   | Tear down all infra (DANGER — deletes the cluster)                               |
-| `task tf:kubeconfig`      | Merge cluster credentials into `~/.kube/config`                                  |
+| Task                              | Description                                                                      |
+|-----------------------------------|----------------------------------------------------------------------------------|
+| `task up`                         | Bring the full stack up via docker compose                                       |
+| `task down`                       | Tear it down                                                                     |
+| `task logs`                       | Tail compose logs for all services (`SERVICE=backend task logs` to limit to one) |
+| `task ps`                         | Show service status                                                              |
+| `task build`                      | Rebuild compose images                                                           |
+| `task test`                       | Run backend Go tests                                                             |
+| `task docker:build`               | Build production images for both services                                        |
+| `task back:run`                   | Run the backend natively (`go run`)                                              |
+| `task back:test`                  | Backend tests                                                                    |
+| `task back:docker:build`          | Build the backend production image                                               |
+| `task back:docker:run`            | Run the backend production image                                                 |
+| `task front:serve`                | Vue dev server (native)                                                          |
+| `task front:build`                | Build the SPA into `frontend/dist`                                               |
+| `task front:docker:build`         | Build the frontend production image                                              |
+| `task front:docker:run`           | Run the frontend production image                                                |
+| `task tf:bootstrap:apply`         | One-off: create tf-admin SA + S3 state bucket (run once)                         |
+| `task tf:infra:plan`              | Show planned cluster changes                                                     |
+| `task tf:infra:apply`             | Provision / update VPC + K8s cluster                                             |
+| `task tf:infra:destroy`           | Tear down all infra (DANGER — deletes the cluster)                               |
+| `task tf:kubeconfig`              | Merge cluster credentials into `~/.kube/config`                                  |
+| `task k8s:addons:ingress:install` | Install / upgrade ingress-nginx controller                                       |
+| `task k8s:namespaces:apply`       | Create application namespaces (`staging`, `production`)                          |
+| `task k8s:staging:deploy`         | Deploy backend, frontend, ingress to staging                                     |
+| `task k8s:production:deploy`      | Deploy backend, frontend, ingress to production                                  |
+| `task k8s:status`                 | Show all helm releases and key cluster resources                                 |
 
 ## Production images
 
 Both Dockerfiles are multi-stage and intended for publishing to a Container Registry.
 
 - **backend**: `golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`. Statically linked binary (`CGO_ENABLED=0`), runs as a non-root user, listens on `:8081`.
-- **frontend**: `node:20-alpine` → `nginxinc/nginx-unprivileged:1.27-alpine`. Static assets from `dist/` are served under the `/momo-store/` path (see [`frontend/vue.config.js`](frontend/vue.config.js)). The API URL is inlined at build time via `--build-arg VUE_APP_API_URL`.
+- **frontend**: `node:20-alpine` → `nginxinc/nginx-unprivileged:1.27-alpine`. Static assets from `dist/` are served from `/`. The API URL is inlined at build time via `--build-arg VUE_APP_API_URL` (default `/api`, expecting an Ingress that routes `/api/*` to the backend; docker-compose overrides it to `http://localhost:8081`).
 
 Build with a custom tag and API URL:
 
@@ -103,7 +112,7 @@ Run the production images locally:
 
 ```bash
 task back:docker:run     # http://localhost:8081
-task front:docker:run    # http://localhost:8080/momo-store/
+task front:docker:run    # http://localhost:8080
 ```
 
 OCI image labels (`org.opencontainers.image.version`, `revision`, `created`) are populated automatically from `git describe`, `git rev-parse HEAD`, and the current UTC timestamp by the Taskfile. CI pipelines can override them via `--build-arg`.
@@ -121,9 +130,9 @@ GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/):
 
 Modified trunk-based:
 
-- **`main`** — single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. ArgoCD picks them up and deploys to **staging**.
-- **`release-YYMMDDHHMM`** — short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. ArgoCD deploys to **production**.
-- **Hotfix flow** — fix in `main` → cherry-pick into a fresh `release-YYMMDDHHMM` branch cut from the broken release.
+- **`main`**: single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. From there, `task k8s:staging:deploy` rolls them out to **staging** (a future ArgoCD step will do this automatically).
+- **`release-YYMMDDHHMM`**: short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. The image tag in `deploy/envs/production/*-values.yaml` is then bumped and `task k8s:production:deploy` rolls it out to **production**.
+- **Hotfix flow**: fix in `main` → cherry-pick into a fresh `release-YYMMDDHHMM` branch cut from the broken release.
 
 ### Image tag scheme
 
@@ -133,7 +142,7 @@ Modified trunk-based:
 | Push to `release-2604301700` | `:release-2604301700`, `:release-2604301700-<sha7>`, `:2604301700` |
 | Pull request                 | (built only, not pushed)                                           |
 
-The bare timestamp tag (`:2604301700`) is what ArgoCD's production Application Set tracks via a regex like `^\d{10}$`.
+The bare timestamp tag (`:2604301700`) is the canonical release identifier; `deploy/envs/production/*-values.yaml` pins to this tag for production deploys.
 
 ### Required GitHub configuration
 
@@ -210,13 +219,13 @@ kubectl get nodes        # should show 2 Ready nodes
 
 ### What gets created
 
-| Resource                                          | Purpose                                                    |
-|---------------------------------------------------|------------------------------------------------------------|
-| `yandex_vpc_network.main` + `yandex_vpc_subnet.a` | One VPC, one /24 subnet in `ru-central1-a`                 |
-| `yandex_iam_service_account.k8s_cluster`          | Cluster SA with `k8s.clusters.agent` and `vpc.publicAdmin` |
-| `yandex_iam_service_account.k8s_nodes`            | Node SA to pull images from YCR (`images.puller`)          |
-| `yandex_kubernetes_cluster.main`                  | Zonal master, K8s 1.33, REGULAR channel, public IP         |
-| `yandex_kubernetes_node_group.main`               | 2 × `standard-v3` (2 vCPU / 4 GB), preemptible             |
+| Resource                                          | Purpose                                                                        |
+|---------------------------------------------------|--------------------------------------------------------------------------------|
+| `yandex_vpc_network.main` + `yandex_vpc_subnet.a` | One VPC, one /24 subnet in `ru-central1-a`                                     |
+| `yandex_iam_service_account.k8s_cluster`          | Cluster SA with `k8s.clusters.agent`, `vpc.publicAdmin`, `load-balancer.admin` |
+| `yandex_iam_service_account.k8s_nodes`            | Node SA to pull images from YCR (`images.puller`)                              |
+| `yandex_kubernetes_cluster.main`                  | Zonal master, K8s 1.33, REGULAR channel, public IP                             |
+| `yandex_kubernetes_node_group.main`               | 2 × `standard-v3` (2 vCPU / 4 GB), preemptible                                 |
 
 Namespaces (`staging`, `production`) and everything that lives inside the cluster (apps, ingress controller, observability stack) are out of scope for terraform.
 
@@ -234,6 +243,57 @@ task tf:infra:destroy
 - **Single AZ + zonal master.** Cheaper, but a YC zone outage takes the whole cluster down. Acceptable for a learning project; for real prod, switch the master to `regional` and spread the node group across zones.
 - **Preemptible nodes.** Up to ~70% cheaper, but YC may evict each node once every 24h. Workloads need to tolerate restarts (which they should anyway).
 - **`admin` role on `tf-admin`.** Convenient, broad. Tighten to a minimal role set once the project stabilizes.
+
+## Kubernetes deployment
+
+Everything inside the cluster is described as Helm charts in [`deploy/`](deploy/) and applied via `task k8s:*`.
+
+```
+deploy/
+├── charts/
+│   ├── namespaces/   # creates the staging + production namespaces
+│   ├── backend/      # Go API: Deployment + Service + ServiceAccount
+│   ├── frontend/     # Vue SPA on nginx: Deployment + Service + ServiceAccount
+│   └── ingress/      # Ingress object: /api → backend, / → frontend
+├── envs/
+│   ├── staging/      # per-chart values overrides for staging
+│   ├── production/   # per-chart values overrides for production
+│   └── addons/       # values for upstream addon charts (ingress-nginx)
+└── Taskfile.yml
+```
+
+Each environment runs three of our Helm releases (`<env>-backend`, `<env>-frontend`, `<env>-ingress`) in its own namespace, plus one cluster-level release for the ingress-nginx controller.
+
+### First-time install
+
+After the cluster is provisioned and `kubectl` points at it (`task tf:kubeconfig`):
+
+```bash
+task k8s:addons:ingress:install   # ingress-nginx controller + Yandex NLB
+task k8s:namespaces:apply         # create staging + production namespaces
+task k8s:staging:deploy           # backend, frontend, ingress in staging
+task k8s:production:deploy        # same in production
+task k8s:status                   # verify everything is Running
+```
+
+### Day-to-day deploys
+
+Re-running `task k8s:<env>:deploy` is idempotent, it issues `helm upgrade --install` for each chart, which updates only what changed.
+
+- **Staging** uses `image.tag: main` with `pullPolicy: Always`, so a fresh `:main` image gets picked up on the next deploy.
+- **Production** pins explicit timestamp tags. Cutting a release: bump `image.tag` in `deploy/envs/production/{backend,frontend}-values.yaml` to the freshly published `:YYMMDDHHMM`, then `task k8s:production:deploy`.
+
+### Tearing it down
+
+To remove just the apps but keep the cluster:
+
+```bash
+helm uninstall staging-{ingress,frontend,backend} -n staging
+helm uninstall production-{ingress,frontend,backend} -n production
+helm uninstall ingress-nginx -n ingress-nginx
+```
+
+Or `task tf:infra:destroy` to delete the whole cluster, which takes everything inside with it.
 
 ## Running without Docker
 

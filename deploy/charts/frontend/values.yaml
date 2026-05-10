@@ -1,0 +1,49 @@
+replicaCount: 1
+
+image:
+  repository: cr.yandex/crpov7nlvkqq2o3n2ivd/frontend
+  tag: main
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+podSecurityContext:
+  runAsNonRoot: true
+  # 101 = uid of the "nginx" user inside nginxinc/nginx-unprivileged (see frontend/Dockerfile).
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
+
+# nginx writes to /var/cache/nginx, /var/run — readOnlyRootFilesystem would break it.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
