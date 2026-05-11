@@ -3,8 +3,10 @@ version: '3'
 vars:
   CHARTS_DIR: charts
   ENVS_DIR: envs
+  ARGOCD_DIR: argocd
 
   INGRESS_NGINX_VERSION: 4.15.1
+  ARGOCD_VERSION: 9.5.13
 
 tasks:
   default:
@@ -19,6 +21,7 @@ tasks:
     desc: Add helm repos for cluster addons
     cmds:
       - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+      - helm repo add argo https://argoproj.github.io/argo-helm
       - helm repo update
 
   addons:ingress:install:
@@ -31,6 +34,36 @@ tasks:
           --version {{.INGRESS_NGINX_VERSION}} \
           -f {{.ENVS_DIR}}/addons/ingress-nginx-values.yaml \
           --wait --timeout 5m
+
+  # --- ArgoCD --------------------------------------------------------------
+
+  argocd:install:
+    desc: Install / upgrade ArgoCD itself (controller, server, repo-server, redis)
+    deps: [addons:repo:add]
+    cmds:
+      - |
+        helm upgrade --install argocd argo/argo-cd \
+          --namespace argocd --create-namespace \
+          --version {{.ARGOCD_VERSION}} \
+          -f {{.ARGOCD_DIR}}/bootstrap-values.yaml \
+          --wait --timeout 5m
+
+  argocd:bootstrap:
+    desc: Apply the root Application (app-of-apps); ArgoCD then manages everything
+    cmds:
+      - kubectl apply -n argocd -f {{.ARGOCD_DIR}}/apps/root.yaml
+
+  argocd:admin:password:
+    desc: Print the initial ArgoCD admin password
+    cmds:
+      - kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+      - echo
+
+  argocd:ui:
+    desc: 'Port-forward ArgoCD UI to http://localhost:8080 (Ctrl+C to stop). Login: admin / `task k8s:argocd:admin:password`'
+    cmds:
+      # Forward to the http port (server runs with --insecure, no TLS).
+      - kubectl port-forward -n argocd svc/argocd-server 8080:80
 
   # --- Namespaces -----------------------------------------------------------
 
@@ -79,6 +112,7 @@ tasks:
     desc: Show all helm releases and key cluster resources
     cmds:
       - helm list -A
+      - kubectl get applications.argoproj.io -n argocd 2>/dev/null || true
       - kubectl get svc -n ingress-nginx ingress-nginx-controller
       - kubectl get pods,svc,ingress -n staging
       - kubectl get pods,svc,ingress -n production

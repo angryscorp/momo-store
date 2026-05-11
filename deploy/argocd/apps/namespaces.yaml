@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespaces
+  namespace: argocd
+  annotations:
+    # Run before everything else so staging/production namespaces exist
+    # before backend/frontend Applications try to deploy into them.
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/angryscorp/momo-store.git
+    targetRevision: main
+    path: deploy/charts/namespaces
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default  # irrelevant; Namespace objects are cluster-scoped
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: staging-ingress
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/angryscorp/momo-store.git
+    targetRevision: main
+    path: deploy/charts/ingress
+    helm:
+      releaseName: staging-ingress
+      valueFiles:
+        - ../../envs/staging/ingress-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
