@@ -1,7 +1,12 @@
+{{- /*
+We need two Ingress objects, not one, because nginx.ingress.kubernetes.io/rewrite-target
+applies to *all* paths in an Ingress. Putting `/api` (with rewrite) and `/` (without)
+in the same Ingress would rewrite asset URLs like `/js/app.js` to an empty string.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ .Release.Name }}-api
   labels:
     app.kubernetes.io/name: ingress
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -9,8 +14,6 @@ metadata:
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
   annotations:
     # Strip the /api prefix before forwarding to the backend.
-    # `(/|$)(.*)` captures everything after /api or just /api itself,
-    # and rewrite-target = /$2 forwards only the captured tail.
     nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
@@ -20,7 +23,6 @@ spec:
       {{- end }}
       http:
         paths:
-          # /api/* -> backend, with /api stripped (see rewrite-target above)
           - path: {{ .Values.backend.pathPrefix }}(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
@@ -28,7 +30,24 @@ spec:
                 name: {{ required "backend.serviceName is required" .Values.backend.serviceName }}
                 port:
                   number: {{ .Values.backend.servicePort }}
-          # everything else -> frontend
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    app.kubernetes.io/name: ingress
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    - {{- with .Values.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
           - path: {{ .Values.frontend.pathPrefix }}
             pathType: Prefix
             backend:
@@ -40,5 +59,5 @@ spec:
   tls:
     - hosts:
         - {{ .Values.host | quote }}
-      secretName: {{ .Release.Name }}-tls
+      secretName: {{ .Release.Name }}-web-tls
   {{- end }}

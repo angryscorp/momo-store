@@ -1,0 +1,23 @@
+# App-of-apps root: ArgoCD watches deploy/argocd/apps/ and creates an Application object for every YAML it finds there.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/angryscorp/momo-store.git
+    targetRevision: main
+    path: deploy/argocd/apps
+    directory:
+      recurse: false
+      # Don't apply root.yaml to itself.
+      exclude: root.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

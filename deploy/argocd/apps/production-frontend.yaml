@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: production-frontend
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/angryscorp/momo-store.git
+    targetRevision: main
+    path: deploy/charts/frontend
+    helm:
+      releaseName: production-frontend
+      valueFiles:
+        - ../../envs/production/frontend-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production

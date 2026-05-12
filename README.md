@@ -21,10 +21,11 @@ This repository is a capstone-style learning project focused on building the ful
 │   ├── bootstrap/      # one-off: tf-admin SA + S3 bucket for tfstate
 │   ├── infra/          # VPC, K8s cluster, node group
 │   └── Taskfile.yml    # facade Taskfile, includes both modules
-├── deploy/             # Kubernetes manifests (Helm charts)
+├── deploy/             # Kubernetes manifests (Helm charts + ArgoCD)
 │   ├── charts/         # namespaces, backend, frontend, ingress
 │   ├── envs/           # per-environment values (staging, production, addons)
-│   └── Taskfile.yml    # k8s:* tasks (deploy, status, addons)
+│   ├── argocd/         # ArgoCD bootstrap values + Application manifests (app-of-apps)
+│   └── Taskfile.yml    # k8s:* tasks (deploy, status, addons, argocd)
 ├── .github/workflows/  # CI (ci.yml) + release pipeline (release.yml)
 ├── docker-compose.yml  # local development for both services
 └── Taskfile.yml        # root Taskfile, includes backend, frontend, terraform, deploy
@@ -89,10 +90,14 @@ Most useful ones:
 | `task tf:infra:destroy`           | Tear down all infra (DANGER — deletes the cluster)                               |
 | `task tf:kubeconfig`              | Merge cluster credentials into `~/.kube/config`                                  |
 | `task k8s:addons:ingress:install` | Install / upgrade ingress-nginx controller                                       |
-| `task k8s:namespaces:apply`       | Create application namespaces (`staging`, `production`)                          |
-| `task k8s:staging:deploy`         | Deploy backend, frontend, ingress to staging                                     |
-| `task k8s:production:deploy`      | Deploy backend, frontend, ingress to production                                  |
-| `task k8s:status`                 | Show all helm releases and key cluster resources                                 |
+| `task k8s:argocd:install`         | Install / upgrade ArgoCD itself                                                  |
+| `task k8s:argocd:bootstrap`       | Apply the root Application (app-of-apps), ArgoCD takes over from here            |
+| `task k8s:argocd:admin:password`  | Print the initial ArgoCD admin password                                          |
+| `task k8s:argocd:ui`              | Port-forward the ArgoCD UI to http://localhost:8080                              |
+| `task k8s:namespaces:apply`       | Create application namespaces directly via helm                                  |
+| `task k8s:staging:deploy`         | Deploy to staging directly via helm                                              |
+| `task k8s:production:deploy`      | Deploy to production directly via helm                                           |
+| `task k8s:status`                 | Show all helm releases, ArgoCD Applications and key cluster resources            |
 
 ## Production images
 
@@ -130,8 +135,8 @@ GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/):
 
 Modified trunk-based:
 
-- **`main`**: single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. From there, `task k8s:staging:deploy` rolls them out to **staging** (a future ArgoCD step will do this automatically).
-- **`release-YYMMDDHHMM`**: short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. The image tag in `deploy/envs/production/*-values.yaml` is then bumped and `task k8s:production:deploy` rolls it out to **production**.
+- **`main`**: single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. ArgoCD reconciles `main` automatically and rolls the new image out to **staging**.
+- **`release-YYMMDDHHMM`**: short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. To roll out, open a PR bumping the image tag in `deploy/envs/production/*-values.yaml`, merge it, and click `Sync` on the `production-*` Applications in the ArgoCD UI.
 - **Hotfix flow**: fix in `main` → cherry-pick into a fresh `release-YYMMDDHHMM` branch cut from the broken release.
 
 ### Image tag scheme
@@ -246,7 +251,9 @@ task tf:infra:destroy
 
 ## Kubernetes deployment
 
-Everything inside the cluster is described as Helm charts in [`deploy/`](deploy/) and applied via `task k8s:*`.
+Everything inside the cluster is described as Helm charts in [`deploy/`](deploy/). 
+**ArgoCD continuously reconciles them from `main`**, you push to git, ArgoCD applies. 
+The `task k8s:*:deploy` commands still exist as an escape hatch for when ArgoCD is unavailable.
 
 ```
 deploy/
@@ -254,15 +261,26 @@ deploy/
 │   ├── namespaces/   # creates the staging + production namespaces
 │   ├── backend/      # Go API: Deployment + Service + ServiceAccount
 │   ├── frontend/     # Vue SPA on nginx: Deployment + Service + ServiceAccount
-│   └── ingress/      # Ingress object: /api → backend, / → frontend
+│   └── ingress/      # Ingress objects: /api → backend, / → frontend (split into two)
 ├── envs/
 │   ├── staging/      # per-chart values overrides for staging
 │   ├── production/   # per-chart values overrides for production
 │   └── addons/       # values for upstream addon charts (ingress-nginx)
+├── argocd/
+│   ├── bootstrap-values.yaml   # values for the argo/argo-cd chart itself
+│   └── apps/                   # one Application per env+chart, plus root.yaml (app-of-apps)
 └── Taskfile.yml
 ```
 
-Each environment runs three of our Helm releases (`<env>-backend`, `<env>-frontend`, `<env>-ingress`) in its own namespace, plus one cluster-level release for the ingress-nginx controller.
+### Layers, top to bottom
+
+| Layer                                 | Managed by    | Applied by                                                       |
+|---------------------------------------|---------------|------------------------------------------------------------------|
+| VPC, k8s master, nodes, IAM           | terraform     | you (`task tf:infra:apply`)                                      |
+| ingress-nginx controller              | upstream helm | you (`task k8s:addons:ingress:install`)                          |
+| ArgoCD itself                         | upstream helm | you (`task k8s:argocd:install`)                                  |
+| Root Application (app-of-apps)        | our manifest  | you, once (`task k8s:argocd:bootstrap`)                          |
+| Namespaces + staging-* + production-* | our charts    | **ArgoCD** (auto for staging, manual click in UI for production) |
 
 ### First-time install
 
@@ -270,26 +288,50 @@ After the cluster is provisioned and `kubectl` points at it (`task tf:kubeconfig
 
 ```bash
 task k8s:addons:ingress:install   # ingress-nginx controller + Yandex NLB
-task k8s:namespaces:apply         # create staging + production namespaces
-task k8s:staging:deploy           # backend, frontend, ingress in staging
-task k8s:production:deploy        # same in production
-task k8s:status                   # verify everything is Running
+task k8s:argocd:install           # ArgoCD itself (controller, server, repo-server, redis)
+task k8s:argocd:bootstrap         # apply the root Application; everything else cascades
+task k8s:status                   # verify Applications and pods
+```
+
+Open the ArgoCD UI to watch sync progress and manually sync production:
+
+```bash
+task k8s:argocd:admin:password    # copy the password
+task k8s:argocd:ui                # http://localhost:8080, login as admin
 ```
 
 ### Day-to-day deploys
 
-Re-running `task k8s:<env>:deploy` is idempotent, it issues `helm upgrade --install` for each chart, which updates only what changed.
+Just commit and push. ArgoCD polls `main` and syncs the change.
 
-- **Staging** uses `image.tag: main` with `pullPolicy: Always`, so a fresh `:main` image gets picked up on the next deploy.
-- **Production** pins explicit timestamp tags. Cutting a release: bump `image.tag` in `deploy/envs/production/{backend,frontend}-values.yaml` to the freshly published `:YYMMDDHHMM`, then `task k8s:production:deploy`.
+- **Staging** (`syncPolicy.automated`): any change in `deploy/charts/*` or `deploy/envs/staging/*` is rolled out automatically, with `prune` and `selfHeal` enabled.
+- **Production** (no `automated` block): changes show up as `OutOfSync` in the UI. Click `Sync` to apply. This replaces the GitHub Environment reviewer gate at the deploy layer.
+
+To promote a new release to production:
+
+1. Bump `image.tag` in `deploy/envs/production/{backend,frontend}-values.yaml` to the freshly published `:YYMMDDHHMM`.
+2. Open a PR, merge to `main`.
+3. In ArgoCD UI → `production-backend` / `production-frontend` → `Sync`.
+
+### Escape hatches
+
+If ArgoCD itself is broken / git is unavailable, you can still drive everything by helm directly:
+
+```bash
+task k8s:namespaces:apply
+task k8s:staging:deploy
+task k8s:production:deploy
+```
+
+ArgoCD's `selfHeal: true` will revert anything you change in the cluster that doesn't match `main`. Either commit your fix or pause the Application in the UI.
 
 ### Tearing it down
 
-To remove just the apps but keep the cluster:
+To remove just the apps but keep the cluster, uninstall the ArgoCD Applications first, then the cluster addons:
 
 ```bash
-helm uninstall staging-{ingress,frontend,backend} -n staging
-helm uninstall production-{ingress,frontend,backend} -n production
+kubectl delete -f deploy/argocd/apps/        # removes all Applications; ArgoCD prunes the apps
+helm uninstall argocd -n argocd
 helm uninstall ingress-nginx -n ingress-nginx
 ```
 
