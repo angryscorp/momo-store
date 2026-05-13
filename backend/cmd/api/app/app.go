@@ -27,7 +27,7 @@ func NewInstance(store dumplings.Store) (*Instance, error) {
 
 	responseTimingsHistogram := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "response_timing_ms",
+			Name:    "momo_response_timing_milliseconds",
 			Help:    "Response timings in milliseconds",
 			Buckets: prometheus.LinearBuckets(0, 50, 10),
 		},
@@ -36,7 +36,7 @@ func NewInstance(store dumplings.Store) (*Instance, error) {
 
 	dumplingsListingCounter := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "dumplings_listing_count",
+			Name: "momo_dumplings_listings_total",
 			Help: "Number of times dumplings pack has been listed",
 		},
 		[]string{"id"},
@@ -44,13 +44,13 @@ func NewInstance(store dumplings.Store) (*Instance, error) {
 
 	ordersCounter := prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "orders_count",
+			Name: "momo_orders_total",
 			Help: "Number of dumplings orders",
 		},
 	)
 	requestCounter := prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "requests_count",
+			Name: "momo_requests_total",
 			Help: "Number of HTTP requests made",
 		},
 	)

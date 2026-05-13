@@ -67,37 +67,40 @@ task --list-all
 
 Most useful ones:
 
-| Task                              | Description                                                                      |
-|-----------------------------------|----------------------------------------------------------------------------------|
-| `task up`                         | Bring the full stack up via docker compose                                       |
-| `task down`                       | Tear it down                                                                     |
-| `task logs`                       | Tail compose logs for all services (`SERVICE=backend task logs` to limit to one) |
-| `task ps`                         | Show service status                                                              |
-| `task build`                      | Rebuild compose images                                                           |
-| `task test`                       | Run backend Go tests                                                             |
-| `task docker:build`               | Build production images for both services                                        |
-| `task back:run`                   | Run the backend natively (`go run`)                                              |
-| `task back:test`                  | Backend tests                                                                    |
-| `task back:docker:build`          | Build the backend production image                                               |
-| `task back:docker:run`            | Run the backend production image                                                 |
-| `task front:serve`                | Vue dev server (native)                                                          |
-| `task front:build`                | Build the SPA into `frontend/dist`                                               |
-| `task front:docker:build`         | Build the frontend production image                                              |
-| `task front:docker:run`           | Run the frontend production image                                                |
-| `task tf:bootstrap:apply`         | One-off: create tf-admin SA + S3 state bucket (run once)                         |
-| `task tf:infra:plan`              | Show planned cluster changes                                                     |
-| `task tf:infra:apply`             | Provision / update VPC + K8s cluster                                             |
-| `task tf:infra:destroy`           | Tear down all infra (DANGER — deletes the cluster)                               |
-| `task tf:kubeconfig`              | Merge cluster credentials into `~/.kube/config`                                  |
-| `task k8s:addons:ingress:install` | Install / upgrade ingress-nginx controller                                       |
-| `task k8s:argocd:install`         | Install / upgrade ArgoCD itself                                                  |
-| `task k8s:argocd:bootstrap`       | Apply the root Application (app-of-apps), ArgoCD takes over from here            |
-| `task k8s:argocd:admin:password`  | Print the initial ArgoCD admin password                                          |
-| `task k8s:argocd:ui`              | Port-forward the ArgoCD UI to http://localhost:8080                              |
-| `task k8s:namespaces:apply`       | Create application namespaces directly via helm                                  |
-| `task k8s:staging:deploy`         | Deploy to staging directly via helm                                              |
-| `task k8s:production:deploy`      | Deploy to production directly via helm                                           |
-| `task k8s:status`                 | Show all helm releases, ArgoCD Applications and key cluster resources            |
+| Task                                   | Description                                                                      |
+|----------------------------------------|----------------------------------------------------------------------------------|
+| `task up`                              | Bring the full stack up via docker compose                                       |
+| `task down`                            | Tear it down                                                                     |
+| `task logs`                            | Tail compose logs for all services (`SERVICE=backend task logs` to limit to one) |
+| `task ps`                              | Show service status                                                              |
+| `task build`                           | Rebuild compose images                                                           |
+| `task test`                            | Run backend Go tests                                                             |
+| `task docker:build`                    | Build production images for both services                                        |
+| `task back:run`                        | Run the backend natively (`go run`)                                              |
+| `task back:test`                       | Backend tests                                                                    |
+| `task back:docker:build`               | Build the backend production image                                               |
+| `task back:docker:run`                 | Run the backend production image                                                 |
+| `task front:serve`                     | Vue dev server (native)                                                          |
+| `task front:build`                     | Build the SPA into `frontend/dist`                                               |
+| `task front:docker:build`              | Build the frontend production image                                              |
+| `task front:docker:run`                | Run the frontend production image                                                |
+| `task tf:bootstrap:apply`              | One-off: create tf-admin SA + S3 state bucket (run once)                         |
+| `task tf:infra:plan`                   | Show planned cluster changes                                                     |
+| `task tf:infra:apply`                  | Provision / update VPC + K8s cluster                                             |
+| `task tf:infra:destroy`                | Tear down all infra (DANGER — deletes the cluster)                               |
+| `task tf:kubeconfig`                   | Merge cluster credentials into `~/.kube/config`                                  |
+| `task k8s:addons:ingress:install`      | Install / upgrade ingress-nginx controller                                       |
+| `task k8s:argocd:install`              | Install / upgrade ArgoCD itself                                                  |
+| `task k8s:argocd:bootstrap`            | Apply the root Application (app-of-apps), ArgoCD takes over from here            |
+| `task k8s:argocd:admin:password`       | Print the initial ArgoCD admin password                                          |
+| `task k8s:argocd:ui`                   | Port-forward the ArgoCD UI to http://localhost:8080                              |
+| `task k8s:monitoring:grafana:password` | Print the Grafana admin password                                                 |
+| `task k8s:monitoring:grafana:ui`       | Port-forward Grafana to http://localhost:3000                                    |
+| `task k8s:monitoring:prometheus:ui`    | Port-forward Prometheus UI to http://localhost:9090                              |
+| `task k8s:namespaces:apply`            | Create application namespaces directly via helm                                  |
+| `task k8s:staging:deploy`              | Deploy to staging directly via helm                                              |
+| `task k8s:production:deploy`           | Deploy to production directly via helm                                           |
+| `task k8s:status`                      | Show all helm releases, ArgoCD Applications and key cluster resources            |
 
 ## Production images
 
@@ -281,6 +284,7 @@ deploy/
 | ArgoCD itself                         | upstream helm | you (`task k8s:argocd:install`)                                  |
 | Root Application (app-of-apps)        | our manifest  | you, once (`task k8s:argocd:bootstrap`)                          |
 | Namespaces + staging-* + production-* | our charts    | **ArgoCD** (auto for staging, manual click in UI for production) |
+| Monitoring (kube-prometheus-stack)    | upstream helm | **ArgoCD** (multi-source: chart upstream, values from our git)   |
 
 ### First-time install
 
@@ -306,6 +310,20 @@ Just commit and push. ArgoCD polls `main` and syncs the change.
 
 - **Staging** (`syncPolicy.automated`): any change in `deploy/charts/*` or `deploy/envs/staging/*` is rolled out automatically, with `prune` and `selfHeal` enabled.
 - **Production** (no `automated` block): changes show up as `OutOfSync` in the UI. Click `Sync` to apply. This replaces the GitHub Environment reviewer gate at the deploy layer.
+
+### Observability
+
+`kube-prometheus-stack` (Prometheus + Grafana + kube-state-metrics + node-exporter + prometheus-operator) is deployed by ArgoCD into the `monitoring` namespace. 
+Alertmanager is disabled, Prometheus retains 7 days of metrics on a 10 GiB PVC, Grafana settings live on a 2 GiB PVC. 
+Backend exposes Prometheus metrics under `momo_*` names (`momo_requests_total`, `momo_response_timing_milliseconds`, ...) on `/metrics`; ingress-nginx exposes its own metrics through a built-in ServiceMonitor.
+
+Access via port-forward:
+
+```bash
+task k8s:monitoring:grafana:password   # copy
+task k8s:monitoring:grafana:ui         # http://localhost:3000, login as admin
+task k8s:monitoring:prometheus:ui      # http://localhost:9090 (no auth)
+```
 
 To promote a new release to production:
 

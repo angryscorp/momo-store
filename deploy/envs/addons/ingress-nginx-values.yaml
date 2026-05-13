@@ -14,6 +14,13 @@ controller:
       cpu: 100m
       memory: 128Mi
 
+  # Expose Prometheus metrics and create a ServiceMonitor for prometheus-operator to scrape them.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: ingress-nginx
+
   # JSON access logs.
   config:
     log-format-escape-json: "true"
