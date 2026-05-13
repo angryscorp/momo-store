@@ -1,0 +1,44 @@
+# Overrides for the upstream kube-prometheus-stack chart.
+# Full reference: https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml
+
+# We don't have anyone to alert; disable to save resources.
+alertmanager:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # Keep metrics for a week.
+    retention: 7d
+
+    # Default storage class for YC is yc-network-hdd.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    # Default selector restricts to objects matching the release labels.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+
+grafana:
+  # When adminPassword is not set, the chart auto-generates a 40-char random password
+  # and stores it in Secret "kube-prometheus-stack-grafana".
+  # Retrieve with: task k8s:monitoring:grafana:password
+
+  persistence:
+    enabled: true
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi

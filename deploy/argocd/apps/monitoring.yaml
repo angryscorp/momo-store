@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    # The chart installs CRDs (ServiceMonitor, PodMonitor, Prometheus, etc.).
+    # Other Applications that reference those CRDs must sync after this one.
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 85.0.2
+      helm:
+        releaseName: kube-prometheus-stack
+        valueFiles:
+          - $values/deploy/envs/addons/kube-prometheus-stack-values.yaml
+    - repoURL: https://github.com/angryscorp/momo-store.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Create the "monitoring" namespace on first sync.
+      - CreateNamespace=true
+      # CRDs are large (>1MB each); skip the last-applied annotation to avoid 262144 byte limit.
+      - ServerSideApply=true
+      # First sync may try to dry-run a Prometheus CR before its CRD is established;
+      # skip dry-run when the resource kind is not yet registered.
+      - SkipDryRunOnMissingResource=true
