@@ -139,8 +139,8 @@ GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/):
 
 Modified trunk-based:
 
-- **`main`**: single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. ArgoCD reconciles `main` automatically and rolls the new image out to **staging**.
-- **`release-YYMMDDHHMM`**: short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. To roll out, open a PR bumping the image tag in `deploy/envs/production/*-values.yaml`, merge it, and click `Sync` on the `production-*` Applications in the ArgoCD UI.
+- **`main`**: single integration branch; always releasable. Every PR merged here triggers a build that pushes `:main` and `:main-<sha>` images to YCR. After both images are pushed, the workflow opens and merges a PR that bumps `deploy/envs/staging/*-values.yaml` to `main-<sha>`, so ArgoCD sees a real Git diff and rolls the new immutable image out to **staging**.
+- **`release-YYMMDDHHMM`**: short-lived release branches cut from `main` for promoting to production. The trailing `YYMMDDHHMM` is just a UTC timestamp serving as the release version (no SemVer). Push to such a branch triggers a build, **pauses for manual approval** in the `production` GitHub environment, then pushes `:YYMMDDHHMM`, `:release-YYMMDDHHMM`, and `:release-YYMMDDHHMM-<sha>` images. After the build, the workflow opens a promotion PR that bumps `deploy/envs/production/*-values.yaml` to the immutable `:release-YYMMDDHHMM-<sha>` tag. Merge it and click `Sync` on the `production-*` Applications in the ArgoCD UI.
 - **Hotfix flow**: fix in `main` → cherry-pick into a fresh `release-YYMMDDHHMM` branch cut from the broken release.
 
 ### Image tag scheme
@@ -151,7 +151,8 @@ Modified trunk-based:
 | Push to `release-2604301700` | `:release-2604301700`, `:release-2604301700-<sha7>`, `:2604301700` |
 | Pull request                 | (built only, not pushed)                                           |
 
-The bare timestamp tag (`:2604301700`) is the canonical release identifier; `deploy/envs/production/*-values.yaml` pins to this tag for production deploys.
+Staging pins to the immutable `:main-<sha7>` tag.
+Production pins to the immutable `:release-YYMMDDHHMM-<sha7>` tag via an automatically opened promotion PR. 
 
 ### Required GitHub configuration
 
@@ -161,7 +162,10 @@ Once-off setup in the repository:
    - `YC_SA_JSON_KEY` — full JSON of the Yandex Cloud service account key with the `container-registry.images.pusher` role on the registry.
 2. **Repository variables** (same screen, Variables tab):
    - `YC_REGISTRY_ID` — the registry ID (`crp...`).
-3. **Environments** (Settings → Environments → New environment):
+3. **Workflow permissions** (Settings → Actions → General):
+   - Enable "Read and write permissions" for `GITHUB_TOKEN`, so the workflow can open staging and production promotion PRs.
+   - Enable "Allow GitHub Actions to create and approve pull requests".
+4. **Environments** (Settings → Environments → New environment):
    - `staging` — no protection rules. Used by `main` builds.
    - `production` — set "Required reviewers" to yourself / team. Used by `release-*` builds; the workflow waits for an approval click before pushing images.
 
@@ -336,9 +340,10 @@ task k8s:monitoring:prometheus:ui      # http://localhost:9090 (no auth)
 
 To promote a new release to production:
 
-1. Bump `image.tag` in `deploy/envs/production/{backend,frontend}-values.yaml` to the freshly published `:YYMMDDHHMM`.
-2. Open a PR, merge to `main`.
-3. In ArgoCD UI → `production-backend` / `production-frontend` → `Sync`.
+1. Cut and push a `release-YYMMDDHHMM` branch.
+2. Approve the `production` environment gate in GitHub Actions.
+3. Review and merge the automatically opened promotion PR. It bumps `deploy/envs/production/{backend,frontend}-values.yaml` to `:release-YYMMDDHHMM-<sha7>`.
+4. In ArgoCD UI → `production-backend` / `production-frontend` → `Sync`.
 
 ### Escape hatches
 

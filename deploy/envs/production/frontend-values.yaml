@@ -1,6 +1,8 @@
 replicaCount: 2
 
 image:
+  # Pin to an immutable release commit tag in production.
+  # release.yml opens a promotion PR that updates this to release-YYMMDDHHMM-<sha7>.
   tag: main
   pullPolicy: IfNotPresent
 

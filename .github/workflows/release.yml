@@ -3,8 +3,9 @@ name: Release
 # Builds and pushes images to Yandex Container Registry.
 #
 # Triggers:
-#   - push to main → tags :main, main-<sha7> (deployed to staging by ArgoCD)
-#   - push to release-* → :<release>, :release-<release>-<sha7>, :<timestamp> (deployed to production after manual approval)
+#   - push to main → tags :main, main-<sha7>, then opens and merges a PR that promotes main-<sha7> to staging
+#   - push to release-* → :<timestamp>, :release-<timestamp>, :release-<timestamp>-<sha7>,
+#     then opens a PR that promotes :release-<timestamp>-<sha7> to production
 #
 # The "production" GitHub environment gates the release-* run with required reviewers,
 # so a push to a release-* branch waits for someone to click "Approve" before pushing
@@ -15,6 +16,15 @@ on:
     branches:
       - main
       - 'release-*'
+    paths-ignore:
+      # These files are updated by the promotion jobs below. Ignoring them prevents
+      # a deployment metadata commit from starting another image build.
+      - 'deploy/envs/staging/**'
+      - 'deploy/envs/production/**'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -92,3 +102,123 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  promote-staging:
+    name: Open staging promotion PR
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Open and merge staging promotion PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          trigger_sha="${GITHUB_SHA}"
+          short_sha="${trigger_sha:0:7}"
+          image_tag="main-${short_sha}"
+          promotion_branch="promote-staging"
+
+          git fetch origin main
+          current_main="$(git rev-parse origin/main)"
+          if [ "${current_main}" != "${trigger_sha}" ]; then
+            echo "origin/main moved to ${current_main}; skipping stale staging promotion for ${trigger_sha}."
+            exit 0
+          fi
+
+          perl -0pi -e "s/(image:\n(?:  #.*\n)*  tag: ).*/\${1}${image_tag}/" \
+            deploy/envs/staging/backend-values.yaml \
+            deploy/envs/staging/frontend-values.yaml
+
+          if git diff --quiet; then
+            echo "Staging already points at ${image_tag}; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${promotion_branch}"
+          git add deploy/envs/staging/backend-values.yaml deploy/envs/staging/frontend-values.yaml
+          git commit -m "chore: deploy ${image_tag} to staging"
+          git fetch origin "refs/heads/${promotion_branch}:refs/remotes/origin/${promotion_branch}" || true
+          git push --force-with-lease="refs/heads/${promotion_branch}" --set-upstream origin "${promotion_branch}"
+
+          pr_url="$(gh pr list --head "${promotion_branch}" --base main --state open --json url --jq '.[0].url')"
+          if [ -z "${pr_url}" ]; then
+            pr_url="$(gh pr create \
+              --base main \
+              --head "${promotion_branch}" \
+              --title "Deploy ${image_tag} to staging" \
+              --body "Promotes backend and frontend staging image tags to \`${image_tag}\` after a successful main build.")"
+          else
+            gh pr edit "${pr_url}" \
+              --title "Deploy ${image_tag} to staging" \
+              --body "Promotes backend and frontend staging image tags to \`${image_tag}\` after a successful main build."
+          fi
+
+          gh pr merge "${pr_url}" --squash --delete-branch
+
+  promote-production:
+    name: Open production promotion PR
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/heads/release-')
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Open promotion PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_branch="${GITHUB_REF_NAME}"
+          short_sha="${GITHUB_SHA:0:7}"
+          image_tag="${release_branch}-${short_sha}"
+          promotion_branch="promote-production-${release_branch}"
+
+          perl -0pi -e "s/(image:\n(?:  #.*\n)*  tag: ).*/\${1}${image_tag}/" \
+            deploy/envs/production/backend-values.yaml
+          perl -0pi -e "s/(image:\n(?:  #.*\n)*  tag: ).*/\${1}${image_tag}/" \
+            deploy/envs/production/frontend-values.yaml
+
+          if git diff --quiet; then
+            echo "Production already points at ${image_tag}; no promotion PR needed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${promotion_branch}"
+          git add deploy/envs/production/backend-values.yaml deploy/envs/production/frontend-values.yaml
+          git commit -m "chore: promote ${image_tag} to production"
+          git fetch origin "refs/heads/${promotion_branch}:refs/remotes/origin/${promotion_branch}" || true
+          git push --force-with-lease="refs/heads/${promotion_branch}" --set-upstream origin "${promotion_branch}"
+
+          pr_url="$(gh pr list --head "${promotion_branch}" --base main --state open --json url --jq '.[0].url')"
+          if [ -z "${pr_url}" ]; then
+            gh pr create \
+              --base main \
+              --head "${promotion_branch}" \
+              --title "Promote ${image_tag} to production" \
+              --body "Promotes backend and frontend production image tags to \`${image_tag}\` after a successful release build."
+          else
+            gh pr edit "${pr_url}" \
+              --title "Promote ${image_tag} to production" \
+              --body "Promotes backend and frontend production image tags to \`${image_tag}\` after a successful release build."
+          fi

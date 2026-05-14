@@ -1,7 +1,8 @@
 replicaCount: 2
 
 image:
-  # Pin to a specific release tag in production. Update via PR when cutting a release.
+  # Pin to an immutable release commit tag in production.
+  # release.yml opens a promotion PR that updates this to release-YYMMDDHHMM-<sha7>.
   # Example: tag: release-2605101230-abc1234
   tag: main
   pullPolicy: IfNotPresent
