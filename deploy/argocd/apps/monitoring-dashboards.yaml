@@ -1,25 +1,20 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: staging-backend
+  name: monitoring-dashboards
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/angryscorp/momo-store.git
     targetRevision: main
-    path: deploy/charts/backend
+    path: deploy/charts/monitoring-dashboards
     helm:
-      releaseName: staging-backend
-      valueFiles:
-        - ../../envs/staging/backend-values.yaml
+      releaseName: monitoring-dashboards
   destination:
     server: https://kubernetes.default.svc
-    namespace: staging
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      # ServiceMonitor CRD is installed by the monitoring Application.
-      - SkipDryRunOnMissingResource=true

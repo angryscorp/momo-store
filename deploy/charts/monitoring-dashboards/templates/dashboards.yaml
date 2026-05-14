@@ -1,0 +1,19 @@
+{{- /*
+For every JSON file under dashboards/ we generate one ConfigMap.
+The grafana-sidecar watches all namespaces for ConfigMaps carrying the grafana_dashboard label and auto-imports them.
+*/}}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $name := base $path | trimSuffix ".json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: momo-dashboard-{{ $name }}
+  labels:
+    {{ $.Values.sidecarLabel }}: {{ $.Values.sidecarLabelValue | quote }}
+  annotations:
+    grafana_folder: {{ $.Values.folder | quote }}
+data:
+  {{ $name }}.json: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
