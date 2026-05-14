@@ -1,0 +1,6 @@
+# Label that grafana-sidecar uses to discover dashboard ConfigMaps.
+sidecarLabel: grafana_dashboard
+sidecarLabelValue: "1"
+
+# Folder name in Grafana UI under which dashboards appear.
+folder: momo-store

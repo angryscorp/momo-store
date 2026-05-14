@@ -1,0 +1,117 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "tags": ["momo-store", "backend", "red"],
+  "title": "Momo Backend - R.E.D.",
+  "uid": "momo-backend-red",
+  "time": {"from": "now-15m", "to": "now"},
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "namespace",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(momo_requests_total, namespace)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {"text": "staging", "value": "staging"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Rate - requests per second",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "reqps", "min": 0}},
+      "options": {"legend": {"displayMode": "table", "calcs": ["mean", "max"]}},
+      "targets": [
+        {
+          "expr": "sum(rate(momo_requests_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "all requests",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Errors - 5xx response rate",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "reqps", "min": 0}},
+      "options": {"legend": {"displayMode": "table", "calcs": ["mean", "max"]}},
+      "description": "Backend currently does not label metrics by status code, so this panel uses ingress-nginx 5xx rate against backend upstream as a proxy.",
+      "targets": [
+        {
+          "expr": "sum(rate(nginx_ingress_controller_requests{exported_namespace=~\"$namespace\",exported_service=~\".*-backend\",status=~\"5..\"}[1m]))",
+          "legendFormat": "5xx /api",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Duration - response time percentiles (ms)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "fieldConfig": {"defaults": {"unit": "ms", "min": 0}},
+      "options": {"legend": {"displayMode": "table", "calcs": ["mean", "max"]}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(momo_response_timing_milliseconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(momo_response_timing_milliseconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(momo_response_timing_milliseconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Orders rate",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "fieldConfig": {"defaults": {"unit": "ops", "min": 0}},
+      "targets": [
+        {
+          "expr": "sum(rate(momo_orders_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "orders/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Top dumplings listings",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "fieldConfig": {"defaults": {"unit": "ops", "min": 0}},
+      "targets": [
+        {
+          "expr": "topk(5, sum by (id) (rate(momo_dumplings_listings_total{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "id={{id}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -30,9 +30,17 @@ prometheus:
         memory: 512Mi
 
 grafana:
-  # When adminPassword is not set, the chart auto-generates a 40-char random password
-  # and stores it in Secret "kube-prometheus-stack-grafana".
+  # Admin credentials live in a Secret created out-of-band (not by the chart),
+  # because helm `lookup()` doesn't work inside ArgoCD's repo-server and the
+  # chart would generate a new password on every sync. Create the Secret once:
+  #
+  #   task k8s:monitoring:grafana:secret:create
+  #
   # Retrieve with: task k8s:monitoring:grafana:password
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
 
   persistence:
     enabled: true

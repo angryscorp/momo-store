@@ -35,6 +35,12 @@ probes:
 
 env: []
 
+# Off by default; enabled per env so the chart still installs in clusters without the prometheus-operator CRDs.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+
 podSecurityContext:
   runAsNonRoot: true
   # 65532 = uid of the "nonroot" user inside the distroless base image

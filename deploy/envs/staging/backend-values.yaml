@@ -3,3 +3,6 @@ replicaCount: 1
 image:
   tag: main
   pullPolicy: Always
+
+serviceMonitor:
+  enabled: true
