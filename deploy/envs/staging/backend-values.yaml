@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   # Updated by release.yml to main-<sha7> on every successful main build.
-  tag: main
+  tag: main-5f4168e
 
 serviceMonitor:
   enabled: true
