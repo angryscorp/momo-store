@@ -5,6 +5,11 @@
 controller:
   replicaCount: 2
 
+  extraArgs:
+    # Our staging/production Ingress objects do not set host names. Without this,
+    # ingress-nginx suppresses request metrics for wildcard/undefined hosts.
+    metrics-per-host: "false"
+
   service:
     # Send traffic only to nodes that run a controller pod, preserving the real client IP in access logs.
     externalTrafficPolicy: Local
